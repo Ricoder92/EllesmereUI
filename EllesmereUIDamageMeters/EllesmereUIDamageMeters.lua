@@ -189,6 +189,8 @@ local DM_DEFAULTS = {
             numberFormat    = 2,
             forceEnglishUnits = false, -- force K/M/B units, ignoring CJK locale's 萬/億 (opt-in; default keeps localized units)
             iconStyle       = "spec",
+            separateIconFromBar = false,
+            iconBarGap      = 15,
             classIconZoom = 0.06,
             iconColorUseAccent = false,
             iconColor       = { r = 1, g = 1, b = 1 },
@@ -238,7 +240,11 @@ local DM_DEFAULTS = {
             hdrBgColor      = { r = 0x1B/255, g = 0x1B/255, b = 0x1B/255 },
             hdrBgAlpha      = 1,
             hdrBottomBorderSize = 0,
+            hdrBottomOffset = 0,
             hdrBottomBorderColor = { r = 0, g = 0, b = 0, a = 1 },
+            hdrBorderTexture = "solid",
+            hdrBorderSize = 0,
+            hdrBorderColor = { r = 0, g = 0, b = 0, a = 1 },
             hdrHeight       = 22,
             hdrFontSize     = 11,
             hdrTextOffX     = 0,
@@ -249,6 +255,7 @@ local DM_DEFAULTS = {
             hdrTextColor    = { r = 1, g = 1, b = 1 },
             borderTexture   = "solid",
             borderSize      = 0,
+            borderAboveWindow = false,
             borderR = 0, borderG = 0, borderB = 0, borderA = 1,
             -- Per-window settings
             windowCount = 1,
@@ -2250,7 +2257,6 @@ local function CreateDMWindow(winIdx)
                 local fb = bar._fillBorder
                 if not fb then
                     fb = CreateFrame("Frame", nil, bar.row)
-                    fb:SetFrameLevel(bar.row:GetFrameLevel() + 3)
                     fb:SetPoint("TOPLEFT", bar.row, "TOPLEFT")
                     fb:SetSize(1, 1)  -- inert; the strips carry the shape
                     fb.top = fb:CreateTexture(nil, "OVERLAY")
@@ -2259,8 +2265,14 @@ local function CreateDMWindow(winIdx)
                     fb.right = fb:CreateTexture(nil, "OVERLAY")
                     bar._fillBorder = fb
                 end
+                -- A ScrollFrame clips all of its descendants regardless of
+                -- frame level. Reparent elevated borders to the window so
+                -- their overhang can render beyond the viewport edges while
+                -- their anchors continue to follow the scrolling bar.
+                fb:SetParent(c.borderAboveWindow and (W.frame or bar.row) or bar.row)
+                fb:SetFrameLevel(c.borderAboveWindow and ((W.header and W.header:GetFrameLevel() or bar.row:GetFrameLevel()) + 5) or (bar.row:GetFrameLevel() + 3))
                 local ft = bar.fill:GetStatusBarTexture()
-                local anchorL = c.borderFollowFillIcon and bar.row or bar.fill
+                local anchorL = (c.borderFollowFillIcon and not c.separateIconFromBar) and bar.row or bar.fill
                 local r, g, b, a = c.borderR or 0, c.borderG or 0, c.borderB or 0, c.borderA or 1
                 fb.top:SetColorTexture(r, g, b, a)
                 fb.bottom:SetColorTexture(r, g, b, a)
@@ -2288,9 +2300,11 @@ local function CreateDMWindow(winIdx)
             if bar._fillBorder then bar._fillBorder:Hide() end
             if not bar._borderFrame then
                 bar._borderFrame = CreateFrame("Frame", nil, bar.row)
-                bar._borderFrame:SetAllPoints(bar.row)
-                bar._borderFrame:SetFrameLevel(bar.row:GetFrameLevel() + 3)
             end
+            bar._borderFrame:SetParent(c.borderAboveWindow and (W.frame or bar.row) or bar.row)
+            bar._borderFrame:SetFrameLevel(c.borderAboveWindow and ((W.header and W.header:GetFrameLevel() or bar.row:GetFrameLevel()) + 5) or (bar.row:GetFrameLevel() + 3))
+            bar._borderFrame:ClearAllPoints()
+            bar._borderFrame:SetAllPoints(c.separateIconFromBar and bar.fill or bar.row)
             bar._borderFrame:Show()
             local tex = c.borderTexture or "solid"
             EllesmereUI.ApplyBorderStyle(bar._borderFrame, sz,
@@ -2301,33 +2315,60 @@ local function CreateDMWindow(winIdx)
         bar.ApplyBorder()
         function bar.ApplyIconBorder()
             local c = DB()
-            local sz = c.iconBorderSize or 0
             local showIcon = (c.iconStyle or "spec") ~= "none"
-            if not c.customIconBorder or sz <= 0 or not showIcon then
+            local inheritBarBorder = c.separateIconFromBar and not c.customIconBorder
+            local sz = inheritBarBorder and (c.borderSize or 0) or (c.iconBorderSize or 0)
+            if (not inheritBarBorder and not c.customIconBorder) or sz <= 0 or not showIcon then
                 if bar._iconBorderFrame then bar._iconBorderFrame:Hide() end
                 return
             end
             if not bar._iconBorderFrame then
                 bar._iconBorderFrame = CreateFrame("Frame", nil, bar.row)
-                bar._iconBorderFrame:SetFrameLevel(bar.row:GetFrameLevel() + 6)
                 bar._iconBorderFrame:SetAllPoints(bar.classIcon) -- tracks icon size/position
             end
+            bar._iconBorderFrame:SetParent(c.borderAboveWindow and (W.frame or bar.row) or bar.row)
+            bar._iconBorderFrame:SetFrameLevel(c.borderAboveWindow and ((W.header and W.header:GetFrameLevel() or bar.row:GetFrameLevel()) + 6) or (bar.row:GetFrameLevel() + 6))
             -- Follow the icon's actual shown state: ResolveIcon hides the icon
             -- for sources without a usable class (secret/NPC rows), and a frame
             -- anchored to a hidden texture would still render a floating border.
             bar._iconBorderFrame:SetShown(bar.classIcon:IsShown())
-            local tex = c.iconBorderTexture or "solid"
+            local tex = inheritBarBorder and ((c.borderFollowFill and "solid") or c.borderTexture or "solid") or (c.iconBorderTexture or "solid")
+            local r = inheritBarBorder and (c.borderR or 0) or (c.iconBorderR or 0)
+            local g = inheritBarBorder and (c.borderG or 0) or (c.iconBorderG or 0)
+            local b = inheritBarBorder and (c.borderB or 0) or (c.iconBorderB or 0)
+            local a = inheritBarBorder and (c.borderA or 1) or (c.iconBorderA or 1)
+            local offsetX, offsetY, shiftX, shiftY, borderKey
+            if inheritBarBorder then
+                offsetX, offsetY = c.borderTextureOffset, c.borderTextureOffsetY
+                shiftX, shiftY = c.borderTextureShiftX, c.borderTextureShiftY
+                borderKey = "damagemeters"
+            else
+                offsetX, offsetY = c.iconBorderTextureOffset, c.iconBorderTextureOffsetY
+                shiftX, shiftY = c.iconBorderTextureShiftX, c.iconBorderTextureShiftY
+                borderKey = "damagemeters_icon"
+            end
             EllesmereUI.ApplyBorderStyle(bar._iconBorderFrame, sz,
-                c.iconBorderR or 0, c.iconBorderG or 0, c.iconBorderB or 0, c.iconBorderA or 1,
-                tex, c.iconBorderTextureOffset, c.iconBorderTextureOffsetY,
-                c.iconBorderTextureShiftX, c.iconBorderTextureShiftY, "damagemeters_icon", sz)
+                r, g, b, a, tex, offsetX, offsetY, shiftX, shiftY, borderKey, sz)
         end
         bar.ApplyIconBorder()
+        -- Elevated borders are no longer descendants of the row, so mirror
+        -- row visibility explicitly to avoid leaving recycled/hidden bars'
+        -- borders floating in the window.
+        bar.row:HookScript("OnHide", function()
+            if bar._borderFrame then bar._borderFrame:Hide() end
+            if bar._fillBorder then bar._fillBorder:Hide() end
+            if bar._iconBorderFrame then bar._iconBorderFrame:Hide() end
+        end)
+        bar.row:HookScript("OnShow", function()
+            bar.ApplyBorder()
+            bar.ApplyIconBorder()
+        end)
         -- Per-bar track background (behind the fill). Default alpha 0 = invisible.
         bar._bg = bar.row:CreateTexture(nil, "BACKGROUND", nil, -8)
-        bar._bg:SetAllPoints(bar.row)
         function bar.ApplyBg()
             local c = DB()
+            bar._bg:ClearAllPoints()
+            bar._bg:SetAllPoints(c.separateIconFromBar and bar.fill or bar.row)
             local a = c.barBgAlpha or 0
             -- Class-colored track when enabled: tint the per-bar background with
             -- this bar's player class color (x the bg alpha), else the custom bg
@@ -2539,14 +2580,26 @@ local function CreateDMWindow(winIdx)
     do local hc = cfg.hdrBgColor; local hR = hc and hc.r or 0x1B/255; local hG = hc and hc.g or 0x1B/255; local hB = hc and hc.b or 0x1B/255
     header._hdrBg = header:CreateTexture(nil, "BACKGROUND"); header._hdrBg:SetAllPoints(); header._hdrBg:SetColorTexture(hR, hG, hB, cfg.hdrBgAlpha or 1) end
     header._bottomBorder = header:CreateTexture(nil, "OVERLAY", nil, 7)
-    header._bottomBorder:SetPoint("BOTTOMLEFT", header, "BOTTOMLEFT", 0, 0)
-    header._bottomBorder:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT", 0, 0)
     do
         local size = cfg.hdrBottomBorderSize or 0
         local color = cfg.hdrBottomBorderColor or {}
+        header._bottomBorder:SetPoint("BOTTOMLEFT", header, "BOTTOMLEFT", 0, 0)
+        header._bottomBorder:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT", 0, 0)
         header._bottomBorder:SetHeight(PhysicalPixels(size))
         header._bottomBorder:SetColorTexture(color.r or 0, color.g or 0, color.b or 0, color.a or 1)
         header._bottomBorder:SetShown(size > 0)
+    end
+    header._borderTarget = CreateFrame("Frame", nil, header)
+    header._borderTarget:SetAllPoints(header)
+    header._borderTarget:SetFrameLevel(header:GetFrameLevel() + 3)
+    do
+        local size = cfg.hdrBorderSize or 0
+        local color = cfg.hdrBorderColor or {}
+        EllesmereUI.ApplyBorderStyle(header._borderTarget, size,
+            color.r or 0, color.g or 0, color.b or 0, color.a or 1,
+            cfg.hdrBorderTexture or "solid", cfg.hdrBorderOffsetX, cfg.hdrBorderOffsetY,
+            cfg.hdrBorderShiftX, cfg.hdrBorderShiftY, "damagemeters", size)
+        header._borderTarget:SetShown(size > 0)
     end
 
     local hdrFS = cfg.hdrFontSize or 11
@@ -3098,7 +3151,8 @@ local function CreateDMWindow(winIdx)
     --  Viewport + scroll
     ---------------------------------------------------------------------------
     local viewport = CreateFrame("ScrollFrame", nil, frame)
-    viewport:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
+    local initialHeaderGap = PhysicalPixels(cfg.hdrBottomOffset or 0)
+    viewport:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -initialHeaderGap)
     viewport:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
     W.viewport = viewport
 
@@ -3155,7 +3209,7 @@ local function CreateDMWindow(winIdx)
     --  Source window
     ---------------------------------------------------------------------------
     W.sourceFrame = CreateFrame("Frame", nil, frame)
-    W.sourceFrame:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
+    W.sourceFrame:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -initialHeaderGap)
     W.sourceFrame:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
     W.sourceFrame:SetFrameLevel(frame:GetFrameLevel() + 20); W.sourceFrame:EnableMouse(true); W.sourceFrame:Hide()
     W.sourceFrame._bg = W.sourceFrame:CreateTexture(nil, "BACKGROUND"); W.sourceFrame._bg:SetAllPoints()
@@ -3379,12 +3433,13 @@ local function CreateDMWindow(winIdx)
     ---------------------------------------------------------------------------
     local function ResetScrollAnchors()
         if not viewport or not header or not frame then return end
+        local headerGap = PhysicalPixels(DB().hdrBottomOffset or 0)
         W.stickyGuard = true
-        viewport:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
+        viewport:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -headerGap)
         viewport:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
         -- Clamp scroll
         if content then
-            local viewH = frame:GetHeight() - GetHeaderH()
+            local viewH = viewport:GetHeight()
             if viewH < 1 then viewH = 1 end
             local totalH = content:GetHeight()
             local maxScr = math.max(0, totalH - viewH)
@@ -3425,7 +3480,7 @@ local function CreateDMWindow(winIdx)
         if not playerIdx then W.stickyPlayer.row:Hide(); W.stickySep:Hide(); ResetScrollAnchors(); W.stickyAtTop = false; return end
         local barH = PhysicalPixels(c.barHeight or 18); local barSp = PhysicalPixels(c.barSpacing); local stride = barH + barSp
         local scrollVal = viewport:GetVerticalScroll() or 0
-        local fullViewH = frame:GetHeight() - GetHeaderH()
+        local fullViewH = frame:GetHeight() - GetHeaderH() - PhysicalPixels(c.hdrBottomOffset or 0)
         if fullViewH < 1 then fullViewH = 1 end
         local pxMult = (PP and PP.mult) or 1
         local barTop = (playerIdx - 1) * stride
@@ -3436,9 +3491,10 @@ local function CreateDMWindow(winIdx)
         end
         local pinTop = (barTop < scrollVal); W.stickyAtTop = pinTop
         local pinnedH = barH + pxMult
+        local headerGap = PhysicalPixels(c.hdrBottomOffset or 0)
         W.stickyPlayer.row:ClearAllPoints(); W.stickySep:ClearAllPoints(); W.stickySep:SetHeight(pxMult)
         if pinTop then
-            W.stickyPlayer.row:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0); W.stickyPlayer.row:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
+            W.stickyPlayer.row:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -headerGap); W.stickyPlayer.row:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, -headerGap)
             W.stickySep:SetPoint("TOPLEFT", W.stickyPlayer.row, "BOTTOMLEFT", 0, 0); W.stickySep:SetPoint("TOPRIGHT", W.stickyPlayer.row, "BOTTOMRIGHT", 0, 0)
         else
             W.stickyPlayer.row:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0); W.stickyPlayer.row:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
@@ -3446,9 +3502,9 @@ local function CreateDMWindow(winIdx)
         end
         W.stickyGuard = true
         if pinTop then
-            viewport:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -pinnedH); viewport:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+            viewport:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -(headerGap + pinnedH)); viewport:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
         else
-            viewport:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0); viewport:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, pinnedH)
+            viewport:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -headerGap); viewport:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, pinnedH)
         end
         -- Clamp scroll after viewport resize
         local newViewH = viewport:GetHeight()
@@ -3469,7 +3525,7 @@ local function CreateDMWindow(winIdx)
         local showIcon = (c.iconStyle or "spec") ~= "none"; local showClassColor = c.showClassColor ~= false
         local texPath, texKey = GetBarTexturePath()
         -- Layout cache: only rebuild on settings change
-        local stickyCacheKey = leftFS .. "|" .. rightFS .. "|" .. texPath .. "|" .. tostring(showIcon) .. "|" .. tostring(showClassColor) .. "|" .. barH .. "|" .. tostring(c.classIconZoom)
+        local stickyCacheKey = leftFS .. "|" .. rightFS .. "|" .. texPath .. "|" .. tostring(showIcon) .. "|" .. tostring(c.separateIconFromBar) .. "|" .. tostring(c.iconBarGap) .. "|" .. tostring(showClassColor) .. "|" .. barH .. "|" .. tostring(c.classIconZoom)
         if stickyCacheKey ~= W._stickyCacheKey then
             W._stickyCacheKey = stickyCacheKey
             bar.row:SetHeight(barH)
@@ -3486,10 +3542,12 @@ local function CreateDMWindow(winIdx)
         if classFile ~= W._stickyClassCache then
             W._stickyClassCache = classFile
             local iconOffset = showIcon and ResolveIcon(src, bar.classIcon, barH) or 0
+            if iconOffset > 0 and c.separateIconFromBar then iconOffset = iconOffset + PhysicalPixels(c.iconBarGap or 15) end
             if not showIcon then bar.classIcon:Hide() end
             if bar._iconBorderFrame then bar._iconBorderFrame:SetShown(bar.classIcon:IsShown()) end
             bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", iconOffset, 0)
             bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0)
+            bar.ApplyBg(); bar.ApplyBorder()
             if showClassColor then
                 local cc = classFile and RAID_CLASS_COLORS[classFile] and EUI.GetClassColor(classFile)
                 if cc then bar.fill:SetStatusBarColor(cc.r, cc.g, cc.b)
@@ -3538,6 +3596,15 @@ local function CreateDMWindow(winIdx)
         bar._src = src; bar._srcGUID = src.sourceGUID; bar._class = classFile
         W.stickySep:Show()
 
+    end
+
+    W.ApplyHeaderBottomOffset = function()
+        local headerGap = PhysicalPixels(DB().hdrBottomOffset or 0)
+        W.sourceFrame:ClearAllPoints()
+        W.sourceFrame:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -headerGap)
+        W.sourceFrame:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+        ResetScrollAnchors()
+        W.UpdateSticky(nil, W.visibleCount)
     end
 
     -- (PEAK_BUDGET is at file scope)
@@ -3590,7 +3657,7 @@ local function CreateDMWindow(winIdx)
             count = math.min(#sources, BAR_POOL_SIZE)
             -- Cache key: detects settings changes that require full bar rebuild
             local iconStyle = c.iconStyle or "spec"
-            local cacheKey = leftFS .. "|" .. rightFS .. "|" .. texPath .. "|" .. iconStyle .. "|" .. tostring(showClassColor) .. "|" .. tostring(c.barColorUseAccent) .. "|" .. barH .. "|" .. barSp .. "|" .. tostring(c.hideNumbers) .. "|" .. tostring(c.leftTextUseClassColor) .. "|" .. tostring(c.rightTextUseClassColor) .. "|" .. tostring(c.barFillAlpha) .. "|" .. tostring(c.classIconZoom)
+            local cacheKey = leftFS .. "|" .. rightFS .. "|" .. texPath .. "|" .. iconStyle .. "|" .. tostring(c.separateIconFromBar) .. "|" .. tostring(c.iconBarGap) .. "|" .. tostring(showClassColor) .. "|" .. tostring(c.barColorUseAccent) .. "|" .. barH .. "|" .. barSp .. "|" .. tostring(c.hideNumbers) .. "|" .. tostring(c.leftTextUseClassColor) .. "|" .. tostring(c.rightTextUseClassColor) .. "|" .. tostring(c.barFillAlpha) .. "|" .. tostring(c.classIconZoom)
             local fullRebuild = (cacheKey ~= W._barCacheKey)
             if fullRebuild then W._barCacheKey = cacheKey end
 
@@ -3638,10 +3705,12 @@ local function CreateDMWindow(winIdx)
                         if classFile ~= bar._cachedClass then
                             bar._cachedClass = classFile
                             local iconOffset = showIcon and ResolveIcon(src, bar.classIcon, barH) or 0
+                            if iconOffset > 0 and c.separateIconFromBar then iconOffset = iconOffset + PhysicalPixels(c.iconBarGap or 15) end
                             if not showIcon then bar.classIcon:Hide() end
                             if bar._iconBorderFrame then bar._iconBorderFrame:SetShown(bar.classIcon:IsShown()) end
                             bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", iconOffset, 0)
                             bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0)
+                            bar.ApplyBg(); bar.ApplyBorder()
                             bar._cachedColorClass = nil
                             -- Repaint the class-colored background for the new class
                             -- (no-op cost when the feature is off). bar._class is set
@@ -3863,8 +3932,11 @@ local function CreateDMWindow(winIdx)
                     if not spIcon then spIcon = 135274 end
                     local _cz = DB().classIconZoom or 0.06
                     bar.classIcon:SetTexture(spIcon); bar.classIcon:SetTexCoord(_cz, 1 - _cz, _cz, 1 - _cz); bar.classIcon:SetSize(barH, barH); bar.classIcon:Show(); iconOffset = barH
+                    if c.separateIconFromBar then iconOffset = iconOffset + PhysicalPixels(c.iconBarGap or 15) end
                     bar.fill:ClearAllPoints(); bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", iconOffset, 0)
                     bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0); bar.fill:SetHeight(barH)
+                    if bar.ApplyBg then bar.ApplyBg() end
+                    if bar.ApplyBorder then bar.ApplyBorder() end
                     -- Fill = HP% remaining at this event
                     local curHP = ev.currentHP or 0
                     local hpPct = maxHP > 0 and (curHP / maxHP) or 0
@@ -3952,8 +4024,11 @@ local function CreateDMWindow(winIdx)
                     -- Class/spec icon via ResolveIcon (consistent with main bars)
                     local fakeSrc = { classFilename = p.class, specIconID = p.specIcon }
                     local iconOffset = ResolveIcon(fakeSrc, bar.classIcon, barH)
+                    if iconOffset > 0 and c.separateIconFromBar then iconOffset = iconOffset + PhysicalPixels(c.iconBarGap or 15) end
                     bar.fill:ClearAllPoints(); bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", iconOffset, 0)
                     bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0); bar.fill:SetHeight(barH)
+                    if bar.ApplyBg then bar.ApplyBg() end
+                    if bar.ApplyBorder then bar.ApplyBorder() end
                     ApplyBarTexture(bar.fill, texPath, texKey); bar.fill:SetMinMaxValues(0, maxAmt); bar.fill:SetValue(p.total)
                     local cc = p.class and RAID_CLASS_COLORS[p.class] and EUI.GetClassColor(p.class)
                     if cc then bar.fill:SetStatusBarColor(cc.r, cc.g, cc.b)
@@ -4011,11 +4086,15 @@ local function CreateDMWindow(winIdx)
                 if spell.spellID then
                     local spIcon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spell.spellID)
                     local _cz = DB().classIconZoom or 0.06
-                    if spIcon then bar.classIcon:SetTexture(spIcon); bar.classIcon:SetTexCoord(_cz, 1 - _cz, _cz, 1 - _cz); bar.classIcon:SetSize(barH, barH); bar.classIcon:Show(); iconOffset = barH
+                    if spIcon then
+                        bar.classIcon:SetTexture(spIcon); bar.classIcon:SetTexCoord(_cz, 1 - _cz, _cz, 1 - _cz); bar.classIcon:SetSize(barH, barH); bar.classIcon:Show(); iconOffset = barH
+                        if c.separateIconFromBar then iconOffset = iconOffset + PhysicalPixels(c.iconBarGap or 15) end
                     else bar.classIcon:Hide() end
                 else bar.classIcon:Hide() end
                 bar.fill:ClearAllPoints(); bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", iconOffset, 0)
                 bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0); bar.fill:SetHeight(barH)
+                if bar.ApplyBg then bar.ApplyBg() end
+                if bar.ApplyBorder then bar.ApplyBorder() end
                 ApplyBarTexture(bar.fill, texPath, texKey); bar.fill:SetMinMaxValues(0, maxAmt); bar.fill:SetValue(entry.amount)
                 if W.sourceClass and RAID_CLASS_COLORS[W.sourceClass] then
                     local cc = EUI.GetClassColor(W.sourceClass); bar.fill:SetStatusBarColor(cc.r, cc.g, cc.b)
@@ -4502,10 +4581,12 @@ ns.ApplyBorder = function()
         if w.rowPool then
             for _, bar in ipairs(w.rowPool) do
                 if bar.ApplyBorder then bar.ApplyBorder() end
+                if bar.ApplyIconBorder then bar.ApplyIconBorder() end
             end
         end
         if w.stickyPlayer and w.stickyPlayer.ApplyBorder then
             w.stickyPlayer.ApplyBorder()
+            if w.stickyPlayer.ApplyIconBorder then w.stickyPlayer.ApplyIconBorder() end
         end
     end
 end
@@ -4591,9 +4672,22 @@ ns.ApplyHeader = function()
             if w.header._bottomBorder then
                 local size = cfg.hdrBottomBorderSize or 0
                 local color = cfg.hdrBottomBorderColor or {}
+                w.header._bottomBorder:ClearAllPoints()
+                w.header._bottomBorder:SetPoint("BOTTOMLEFT", w.header, "BOTTOMLEFT", 0, 0)
+                w.header._bottomBorder:SetPoint("BOTTOMRIGHT", w.header, "BOTTOMRIGHT", 0, 0)
                 w.header._bottomBorder:SetHeight(PhysicalPixels(size))
                 w.header._bottomBorder:SetColorTexture(color.r or 0, color.g or 0, color.b or 0, color.a or 1)
                 w.header._bottomBorder:SetShown(size > 0)
+            end
+            if w.ApplyHeaderBottomOffset then w.ApplyHeaderBottomOffset() end
+            if w.header._borderTarget then
+                local size = cfg.hdrBorderSize or 0
+                local color = cfg.hdrBorderColor or {}
+                EllesmereUI.ApplyBorderStyle(w.header._borderTarget, size,
+                    color.r or 0, color.g or 0, color.b or 0, color.a or 1,
+                    cfg.hdrBorderTexture or "solid", cfg.hdrBorderOffsetX, cfg.hdrBorderOffsetY,
+                    cfg.hdrBorderShiftX, cfg.hdrBorderShiftY, "damagemeters", size)
+                w.header._borderTarget:SetShown(size > 0)
             end
         end
         if w.frame and w.frame._bg then

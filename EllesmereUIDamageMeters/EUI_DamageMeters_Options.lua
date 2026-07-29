@@ -419,40 +419,105 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        -- Row 2: Header Bottom Border (+ inline swatch) | Icon Size (+ inline dual swatches)
-        local hdrBorderRow
-        hdrBorderRow, h = W:DualRow(parent, y,
+        -- Row 2: separate bottom divider | divider offset
+        local hdrBottomRow
+        hdrBottomRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Header Bottom Border",
               values=borderSizeValues, order=borderSizeOrder,
               getValue=function() return tostring(Cfg("hdrBottomBorderSize") or 0) end,
               setValue=function(v) Set("hdrBottomBorderSize", tonumber(v) or 0); ApplyHdr() end },
-            { type="slider", text="Icon Size",
-              min = 20, max = 30, step = 1,
-              getValue = function() return Cfg("hdrIconSize") or 22 end,
-              setValue = function(v) Set("hdrIconSize", v); ApplyHdr() end })
+            { type="slider", text="Header Bottom Offset", pixel=true,
+              min=0, max=20, step=1,
+              tooltip="Adds vertical space between the header and the bar area.",
+              getValue=function() return Cfg("hdrBottomOffset") or 0 end,
+              setValue=function(v) Set("hdrBottomOffset", v); ApplyHdr(); Refresh() end })
         do
-            local rgn, ctrl = hdrBorderRow._leftRegion, hdrBorderRow._leftRegion._control
+            local rgn, ctrl = hdrBottomRow._leftRegion, hdrBottomRow._leftRegion._control
             local swatch, refreshSwatch = EllesmereUI.BuildColorSwatch(
-                rgn, hdrBorderRow:GetFrameLevel() + 3,
+                rgn, hdrBottomRow:GetFrameLevel() + 3,
                 function()
                     local c = Cfg("hdrBottomBorderColor") or {}
                     return c.r or 0, c.g or 0, c.b or 0, c.a or 1
                 end,
                 function(r, g, b, a)
-                    Set("hdrBottomBorderColor", { r=r, g=g, b=b, a=a or 1 })
-                    ApplyHdr()
+                    Set("hdrBottomBorderColor", { r=r, g=g, b=b, a=a or 1 }); ApplyHdr()
                 end,
                 true, 20)
             PP.Point(swatch, "RIGHT", ctrl, "LEFT", -8, 0)
             EllesmereUI.RegisterWidgetRefresh(refreshSwatch)
         end
+        y = y - h
+
+        -- Row 3: full header border
+        local hdrBorderTexValues, hdrBorderTexOrder = EllesmereUI.GetBorderTextureDropdown()
+        local hdrBorderRow
+        hdrBorderRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Border Style",
+              values=hdrBorderTexValues, order=hdrBorderTexOrder,
+              getValue=function() return Cfg("hdrBorderTexture") or "solid" end,
+              setValue=function(v) Set("hdrBorderTexture", v); ApplyHdr() end },
+            { type="slider", text="Border Size", min=0, max=4, step=1,
+              getValue=function() return Cfg("hdrBorderSize") or 0 end,
+              setValue=function(v) Set("hdrBorderSize", v); ApplyHdr() end })
+        do
+            local rgn = hdrBorderRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Header Border Offset",
+                rows = {
+                    { type="slider", label="Offset X", min=-10, max=10, step=1,
+                      get=function() return Cfg("hdrBorderOffsetX") or 0 end,
+                      set=function(v) Set("hdrBorderOffsetX", v == 0 and nil or v); ApplyHdr() end },
+                    { type="slider", label="Offset Y", min=-10, max=10, step=1,
+                      get=function() return Cfg("hdrBorderOffsetY") or 0 end,
+                      set=function(v) Set("hdrBorderOffsetY", v == 0 and nil or v); ApplyHdr() end },
+                    { type="slider", label="Shift X", min=-10, max=10, step=1,
+                      get=function() return Cfg("hdrBorderShiftX") or 0 end,
+                      set=function(v) Set("hdrBorderShiftX", v == 0 and nil or v); ApplyHdr() end },
+                    { type="slider", label="Shift Y", min=-10, max=10, step=1,
+                      get=function() return Cfg("hdrBorderShiftY") or 0 end,
+                      set=function(v) Set("hdrBorderShiftY", v == 0 and nil or v); ApplyHdr() end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26); cogBtn:SetPoint("RIGHT", rgn._control, "LEFT", -8, 0)
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5); cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY"); cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+        end
+        do
+            local rgn, ctrl = hdrBorderRow._rightRegion, hdrBorderRow._rightRegion._control
+            local swatch, refreshSwatch = EllesmereUI.BuildColorSwatch(
+                rgn, hdrBorderRow:GetFrameLevel() + 3,
+                function()
+                    local c = Cfg("hdrBorderColor") or {}
+                    return c.r or 0, c.g or 0, c.b or 0, c.a or 1
+                end,
+                function(r, g, b, a)
+                    Set("hdrBorderColor", { r=r, g=g, b=b, a=a or 1 }); ApplyHdr()
+                end,
+                true, 20)
+            PP.Point(swatch, "RIGHT", ctrl, "LEFT", -8, 0)
+            EllesmereUI.RegisterWidgetRefresh(refreshSwatch)
+        end
+        y = y - h
+
+        -- Row 4: Icon Size (+ inline dual swatches)
+        local hdrIconRow
+        hdrIconRow, h = W:DualRow(parent, y,
+            { type="slider", text="Icon Size",
+              min = 20, max = 30, step = 1,
+              getValue = function() return Cfg("hdrIconSize") or 22 end,
+              setValue = function(v) Set("hdrIconSize", v); ApplyHdr() end },
+            { type="spacer" })
         -- Inline dual swatches on Icon Size: right = Custom, left = Accent
         do
-            local rgn = hdrBorderRow._rightRegion
+            local rgn = hdrIconRow._leftRegion
             local ctrl = rgn._control
 
             local customSwatch, updateCustom = EllesmereUI.BuildColorSwatch(
-                rgn, hdrBorderRow:GetFrameLevel() + 3,
+                rgn, hdrIconRow:GetFrameLevel() + 3,
                 function()
                     local c = Cfg("iconColor")
                     if c then return c.r or 1, c.g or 1, c.b or 1 end
@@ -482,7 +547,7 @@ initFrame:SetScript("OnEvent", function(self)
             customSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
             local accentSwatch, updateAccent = EllesmereUI.BuildColorSwatch(
-                rgn, hdrBorderRow:GetFrameLevel() + 3,
+                rgn, hdrIconRow:GetFrameLevel() + 3,
                 function()
                     return EllesmereUI.ResolveActiveAccent()
                 end,
@@ -536,7 +601,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        -- Row 3: Top Text Size (+ inline dual swatches)
+        -- Row 4: Header Text Size (+ inline dual swatches)
         local hdrRow2
         hdrRow2, h = W:DualRow(parent, y,
             { type="slider", text="Text Size",
@@ -723,6 +788,22 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v) Set("iconStyle", v); ApplyIconBrd(); Refresh(); EllesmereUI:RefreshPage() end })
         y = y - h
 
+        -- Keep the icon fixed while the bar starts farther inward.
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Separate Icon from Bar",
+              tooltip = "Adds a gap between the icon and bar. The icon stays in place while the bar shrinks inward.",
+              getValue = function() return Cfg("separateIconFromBar") or false end,
+              setValue = function(v)
+                  Set("separateIconFromBar", v)
+                  ApplyBrd(); ApplyIconBrd(); Refresh(); EllesmereUI:RefreshPage()
+              end },
+            { type="slider", text="Icon-Bar Gap", pixel=true, min=5, max=20, step=1,
+              disabled = function() return not Cfg("separateIconFromBar") end,
+              disabledTooltip = "Separate Icon from Bar",
+              getValue = function() return Cfg("iconBarGap") or 15 end,
+              setValue = function(v) Set("iconBarGap", v); Refresh() end })
+        y = y - h
+
         -- Inline cog: Icon Zoom (right region, next to "Icon Style")
         do
             local rgn = iconRow._rightRegion
@@ -843,6 +924,10 @@ initFrame:SetScript("OnEvent", function(self)
                           return dsy
                       end,
                       set = function(v) Set("borderTextureShiftY", v == 0 and nil or v); ApplyBrd() end },
+                    { type = "toggle", label = "Border Above Window",
+                      tooltip = "Draws bar and icon borders one level above the damage-meter window border.",
+                      get = function() return Cfg("borderAboveWindow") or false end,
+                      set = function(v) Set("borderAboveWindow", v); ApplyBrd(); ApplyIconBrd() end },
                     { type = "toggle", label = "Custom Icon Border",
                       get = function() return Cfg("customIconBorder") or false end,
                       set = function(v)
